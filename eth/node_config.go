@@ -296,6 +296,7 @@ func (n *NodeConfig) pubsubOptions(subFilter pubsub.SubscriptionFilter, activeVa
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
 		// pubsub.WithRawTracer(gossipTracer{host: s.host}),
 	}
+
 	return psOpts
 }
 
@@ -376,7 +377,7 @@ func desiredPubSubBaseTopics() []string {
 	return []string{
 		p2p.GossipBlockMessage,
 		p2p.GossipAggregateAndProofMessage,
-		// p2p.GossipAttestationMessage,
+		p2p.GossipAttestationMessage,
 		p2p.GossipExitMessage,
 		p2p.GossipAttesterSlashingMessage,
 		p2p.GossipProposerSlashingMessage,
@@ -475,8 +476,9 @@ func (n *NodeConfig) getDefaultTopicScoreParams(encoder encoder.NetworkEncoding,
 	desiredTopics := n.getDesiredFullTopics(encoder)
 	topicScores := make(map[string]*pubsub.TopicScoreParams, len(desiredTopics))
 	for _, topic := range desiredTopics {
-		params := topicToScoreParamsMapper(topic, activeValidators)
-		topicScores[topic] = params
+		if params := topicToScoreParamsMapper(topic, activeValidators); params != nil {
+			topicScores[topic] = params
+		}
 	}
 	return topicScores
 }
