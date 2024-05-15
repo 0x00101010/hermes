@@ -110,6 +110,8 @@ func (p *PubSub) mapPubSubTopicWithHandlers(topic string) host.TopicHandler {
 		return p.handleBeaconBlock
 	case strings.Contains(topic, p2p.GossipBlobSidecarMessage):
 		return p.handleBlobSidecar
+	case strings.Contains(topic, p2p.GossipAttestationMessage):
+		return p.handleAttestation
 	default:
 		return p.host.TracedTopicHandler(host.NoopHandler)
 	}
@@ -215,6 +217,58 @@ func (p *PubSub) handleBlobSidecar(ctx context.Context, msg *pubsub.Message) err
 		}
 	default:
 		return fmt.Errorf("non recognized fork-version: %d", p.cfg.ForkVersion[:])
+	}
+
+	return nil
+}
+
+func (p *PubSub) handleAttestation(ctx context.Context, msg *pubsub.Message) error {
+	if msg == nil || msg.Topic == nil || *msg.Topic == "" {
+		return fmt.Errorf("nil message or topic")
+	}
+
+	attestation := ethtypes.Attestation{}
+	err := p.cfg.Encoder.DecodeGossip(msg.Data, &attestation)
+	if err != nil {
+		return fmt.Errorf("decode attestation gossip message: %w", err)
+	}
+	attestation.GetData().GetCommitteeIndex()
+
+	now := time.Now()
+	evt := &host.TraceEvent{
+		Type:      "HANDLE_MESSAGE",
+		PeerID:    p.host.ID(),
+		Timestamp: now,
+		Payload: map[string]any{
+			"PeerID":          msg.ReceivedFrom.String(),
+			"MsgID":           hex.EncodeToString([]byte(msg.ID)),
+			"MsgSize":         len(msg.Data),
+			"Topic":           msg.GetTopic(),
+			"Seq":             msg.GetSeqno(),
+			"CommIdx":         attestation.GetData().GetCommitteeIndex(),
+			"Slot":            attestation.GetData().GetSlot(),
+			"BeaconBlockRoot": attestation.GetData().GetBeaconBlockRoot(),
+			"Source":          attestation.GetData().GetSource(),
+			"Target":          attestation.GetData().GetTarget(),
+		},
+	}
+	slog.Info(
+		"Handling attestation gossip message",
+		"PeerID", p.host.ID(),
+		"RemotePeerID", msg.ReceivedFrom.String(),
+		"MsgID", hex.EncodeToString([]byte(msg.ID)),
+		"MsgSize", len(msg.Data),
+		"Topic", msg.GetTopic(),
+		"Seq", msg.GetSeqno(),
+		"CommIdx", attestation.GetData().GetCommitteeIndex(),
+		"Slot", attestation.GetData().GetSlot(),
+		"BeaconBlockRoot", attestation.GetData().GetBeaconBlockRoot(),
+		"Source", attestation.GetData().GetSource(),
+		"Target", attestation.GetData().GetTarget(),
+	)
+
+	if err := p.cfg.DataStream.PutRecord(ctx, evt); err != nil {
+		slog.Warn("failed putting topic handler event", tele.LogAttrError(err))
 	}
 
 	return nil
